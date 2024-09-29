@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KMeans Clustering Visualization</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        #plot {
+            width: 800px;
+            height: 600px;
+            border: 1px solid #ccc;
+            margin: 20px auto;
+            cursor: crosshair;
+        }
+
+        #coordinates {
+            text-align: center;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center">KMeans Clustering Visualization</h1>
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label for="init-method">Initialization Method:</label>
+                    <select class="form-control" id="init-method">
+                        <option value="random">Random</option>
+                        <option value="farthest">Farthest First</option>
+                        <option value="kmeans++">KMeans++</option>
+                        <option value="manual">Manual</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="num-centroids">Number of Centroids:</label>
+                    <input type="number" class="form-control" id="num-centroids" value="4" min="1" max="10">
+                </div>
+                <button class="btn btn-primary" id="new-dataset">Generate New Dataset</button>
+                <button class="btn btn-warning" id="initialize">Initialize Centroids</button>
+                <button class="btn btn-success" id="step-through">Step Through</button>
+                <button class="btn btn-info" id="converge">Run to Convergence</button>
+                <button class="btn btn-danger" id="reset">Reset Algorithm</button>
+            </div>
+            <div class="col-md-8">
+                <img id="plot" src="" alt="KMeans Visualization" />
+                <div id="coordinates">Mouse Coordinates: (x, y)</div> <!-- Display coordinates here -->
+            </div>
+        </div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script>
+        let data = [];
+        let centroids = [];
+        let manualCentroids = [];
+        let numCentroids = 0;
+        let isManualMode = false;
+
+        // Function to update plot image
+        function updatePlot(imgSrc) {
+            if (imgSrc) {
+                $('#plot').attr('src', 'data:image/png;base64,' + imgSrc);
+            }
+        }
+
+        // Event listener for Generate New Dataset button
+        $('#new-dataset').click(function() {
+            axios.post('/generate_dataset').then(response => {
+                data = response.data.data;
+                updatePlot(response.data.plot);  // Update the plot with the new dataset
+            });
+        });
+
+//Initialize Centroids button event listener
+$('#initialize').click(function() {
+    const method = $('#init-method').val();  // Get the selected initialization method
+    numCentroids = parseInt($('#num-centroids').val());  // Get the number of centroids from the input field
+
+    if (method === 'manual') {
+        // Enter manual mode for centroid selection
+        isManualMode = true;
+        $('#coordinates').show();  // Show the coordinates display when manual mode is active
+        manualCentroids = [];  // Reset manual centroids array
+        alert(`Please click ${numCentroids} times on the plot to set the centroids.`);
+    } else {
+        // Hide coordinates and exit manual mode for other initialization methods
+        isManualMode = false;
+        $('#coordinates').hide();  // Hide the coordinates display
+        axios.post('/initialize_centroids', { method: method, k: numCentroids })
+            .then(response => {
+                centroids = response.data.centroids;
+                updatePlot(response.data.plot);  // Update the plot with initialized centroids
+            }).catch(error => {
+                console.error("Failed to initialize centroids: " + error);
+            });
+    }
+});
+
+
+//Click event listener 
+$('#plot').click(function(event) {
+    if (isManualMode) {  // Check if manual mode is active
+        const rect = this.getBoundingClientRect();
+        const x = event.clientX - rect.left;  // X-coordinate relative to image
+        const y = event.clientY - rect.top;   // Y-coordinate relative to image
+
+        // Convert pixel coordinates to data coordinates (from -10 to 10)
+        const plotWidth = rect.width;
+        const plotHeight = rect.height;
+        const xScale = (10 - (-10)) / plotWidth;  // Data range divided by pixel width
+        const yScale = (10 - (-10)) / plotHeight; // Data range divided by pixel height
+
+        // Convert pixel coordinates to data coordinates using scale factor
+        const dataX = (x * xScale) - 10;  // Scale and shift to data range
+        const dataY = ((plotHeight - y) * yScale) - 10;  // Scale and shift to data range and invert y-axis
+
+        // Store clicked coordinates
+        manualCentroids.push([dataX, dataY]);
+
+        // Send the current centroids to the server to update the plot after each click
+        axios.post('/initialize_centroids', { method: 'manual', centroids: manualCentroids })
+            .then(response => {
+                updatePlot(response.data.plot);  // Update the plot with the newly added centroid
+                if (manualCentroids.length === numCentroids) {
+                    isManualMode = false;  // Exit manual mode when all centroids are selected
+                    $('#coordinates').hide();  // Hide coordinates display when manual selection is complete
+                }
+            }).catch(error => {
+                console.error("Failed to set manual centroids: " + error);
+            });
+    }
+});
+
+
+// Event listener to display mouse coordinates as the user hovers over the plot
+$('#plot').mousemove(function(event) {
+    if (isManualMode) {  // Only show coordinates when manual mode is active
+        const rect = this.getBoundingClientRect();
+
+        // Calculate coordinates relative to the plot area within the image
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+
+        // Get the plot area width and height within the image
+        const plotWidth = rect.width;
+        const plotHeight = rect.height;
+
+        // Convert mouse coordinates to data coordinates
+        const xMin = -10, xMax = 10, yMin = -10, yMax = 10;  // Plot data limits
+        const dataX = xMin + (x / plotWidth) * (xMax - xMin);  // Map x to data range
+        const dataY = yMax - (y / plotHeight) * (yMax - yMin);  // Map y to data range and invert
+
+        // Update the coordinates display
+        $('#coordinates').text(`Mouse Coordinates: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`);
+    }
+});
+
+
+
+
+        // Event listener for Step Through button
+$('#step-through').click(function() {
+    if (centroids && centroids.length > 0) {
+        axios.post('/kmeans_step').then(response => {
+            if (response.data.plot) {
+                updatePlot(response.data.plot);  // Update the plot with the latest state
+                centroids = response.data.centroids;  // Update the centroids with the latest from the server
+                labels = response.data.labels;  // Update the labels with the latest from the server
+                console.log("Step through successful.");
+            } else {
+                console.error("Error during step-through: " + response.data.error);
+            }
+        }).catch(error => {
+            console.error("Failed to step through: " + error);
+        });
+    } else {
+        console.error("Centroids are not initialized. Please initialize centroids before stepping through.");
+    }
+});
+
+// Event listener for Run to Convergence button
+$('#converge').click(function() {
+    if (centroids && centroids.length > 0) {
+        axios.post('/kmeans_converge').then(response => {
+            if (response.data.plot) {
+                updatePlot(response.data.plot);  // Update the plot with the final clusters after convergence
+                centroids = response.data.centroids;  // Update centroids state
+                labels = response.data.labels;  // Update labels state
+                console.log("KMeans has converged successfully.");
+            } else {
+                console.error("Error during convergence: " + response.data.error);
+            }
+        }).catch(error => {
+            console.error("Failed to run to convergence: " + error);
+        });
+    } else {
+        console.error("Centroids are not initialized. Please initialize centroids before running to convergence.");
+    }
+});
+
+// Event listener for Reset Algorithm button
+$('#reset').click(function() {
+    axios.post('/reset').then(response => {
+        centroids = [];  // Clear the centroids array on the client side
+        labels = [];     // Clear the labels array on the client side
+
+        // Update the plot to reflect the reset state
+        updatePlot(response.data.plot);
+        console.log("Algorithm state has been reset.");
+    }).catch(error => {
+        console.error("Failed to reset the algorithm state: " + error);
+    });
+});
+
+    </script>
+</body>
+</html>
